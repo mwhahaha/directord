@@ -83,7 +83,8 @@ class Component(components.ComponentBase):
         :returns: tuple
         """
 
-        self.log.debug("client(): job: %s, cache: %s", job, cache)
+        self.log.debug("%s | client(): job=%s", job['job_id'], job)
+        self.log.debug("%s | args: %s", job['job_id'], cache.get("args"))
         state = job.get("state")
         clear = job.get("clear")
 

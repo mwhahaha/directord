@@ -117,7 +117,8 @@ class Component(components.ComponentBase):
         :returns: tuple
         """
 
-        self.log.debug("client(): job: %s, cache: %s", job, cache)
+        self.log.debug("%s | client(): job=%s", job['job_id'], job)
+        self.log.debug("%s | args: %s", job['job_id'], cache.get("args"))
         with Transfer(driver=self.driver) as bind_transfer:
             return self._client(
                 cache, job, self.info, self.driver, bind_transfer
