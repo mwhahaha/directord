@@ -515,7 +515,7 @@ class Client(interface.Interface):
 
             if locked:
                 lock.release()
-
+            """
             if component.block_on_tasks:
                 block_on_task_data = component.block_on_tasks[-1]
                 block_on_task = True
@@ -542,6 +542,29 @@ class Client(interface.Interface):
                     "Task sha [ %s ] callback complete",
                     block_on_task_data["job_sha3_224"],
                 )
+            """
+
+            if component.block_on_tasks:
+                while len(component.block_on_tasks) > 0:
+                    block_on_task_data = component.block_on_tasks.pop()
+                    status = self.cache.get(block_on_task_data["job_sha3_224"])
+                    jobs = [
+                        self.driver.job_end.decode(),
+                        self.driver.job_failed.decode(),
+                    ]
+                    self.log.debug("status: %s, jobs: %s", status, jobs)
+                    if status in [ jobs ]:
+                        self.log.debug(
+                            "Task sha [ %s ] callback complete",
+                            block_on_task_data["job_sha3_224"],
+                        )
+                    else:
+                        component.block_on_tasks.append(block_on_task_data)
+                        self.log.debug(
+                            "waiting for callback job to complete. %s",
+                            block_on_task_data,
+                        )
+                        time.sleep(0.5)
 
             self.log.debug(
                 "Component execution complete for job [ %s ].",
