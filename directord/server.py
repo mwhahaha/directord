@@ -515,8 +515,8 @@ class Server(interface.Interface):
             else:
                 time.sleep(poller_interval * 0.001)
 
-    def run_interactions(self, sentinel=False):
-        """Execute the interactions loop.
+    def run_transfers(self, sentinel=False):
+        """Execute the transfer loop.
 
         Directord's interaction executor will slow down the poll interval
         when no work is present. This means Directord will ramp-up resource
@@ -530,10 +530,9 @@ class Server(interface.Interface):
         :type sentinel: Boolean
         """
 
-        self.bind_job = self.driver.job_bind()
         self.bind_transfer = self.driver.transfer_bind()
         poller_time = time.time()
-        poller_interval = 1
+        poller_interval = 128
 
         while True:
             if self.job_queue.empty() and self.send_queue.empty():
@@ -542,23 +541,6 @@ class Server(interface.Interface):
                     poller_interval=poller_interval,
                     log=self.log,
                 )
-
-            while True:
-                try:
-                    send_item = self.send_queue.get_nowait()
-                except Exception:
-                    break
-                else:
-                    self.log.debug(
-                        "Sending job [ %s ] sent to [ %s ]",
-                        send_item["data"]["job_id"],
-                        send_item["identity"].decode(),
-                    )
-                    send_item["data"] = json.dumps(send_item["data"]).encode()
-                    self.driver.socket_send(
-                        socket=self.bind_job,
-                        **send_item,
-                    )
 
             if self.driver.bind_check(
                 bind=self.bind_transfer, constant=poller_interval
@@ -599,7 +581,56 @@ class Server(interface.Interface):
                             os.path.expanduser(transfer_obj)
                         ),
                     )
-            elif self.driver.bind_check(
+
+            if sentinel:
+                break
+
+
+    def run_interactions(self, sentinel=False):
+        """Execute the interactions loop.
+
+        Directord's interaction executor will slow down the poll interval
+        when no work is present. This means Directord will ramp-up resource
+        utilization when required and become virtually idle when there's
+        nothing to do.
+
+        * Initial poll interval is 1024, maxing out at 2048. When work is
+          present, the poll interval is 1.
+
+        :param sentinel: Breaks the loop
+        :type sentinel: Boolean
+        """
+
+        self.bind_job = self.driver.job_bind()
+        poller_time = time.time()
+        poller_interval = 1
+
+        while True:
+            if self.job_queue.empty() and self.send_queue.empty():
+                poller_interval = utils.return_poller_interval(
+                    poller_time=poller_time,
+                    poller_interval=poller_interval,
+                    log=self.log,
+                )
+
+            while True:
+                try:
+                    send_item = self.send_queue.get_nowait()
+                except Exception:
+                    break
+                else:
+                    self.log.debug(
+                        "Sending job [ %s ] sent to [ %s ]",
+                        send_item["data"]["job_id"],
+                        send_item["identity"].decode(),
+                    )
+                    send_item["data"] = json.dumps(send_item["data"]).encode()
+                    self.driver.socket_send(
+                        socket=self.bind_job,
+                        **send_item,
+                    )
+
+            if self.driver.bind_check(
                 bind=self.bind_job, constant=poller_interval
             ):
                 poller_interval, poller_time = 1, time.time()
@@ -607,7 +638,7 @@ class Server(interface.Interface):
                     identity,
                     msg_id,
                     control,
-                    command,
+                    _,
                     data,
                     info,
                     stderr,
@@ -820,6 +851,12 @@ class Server(interface.Interface):
             (
                 self.thread(
                     name="run_interactions", target=self.run_interactions
+                ),
+                True,
+            ),
+            (
+                self.thread(
+                    name="run_transfers", target=self.run_transfers
                 ),
                 True,
             ),

@@ -198,7 +198,6 @@ class Processor:
             data = file_object.read(chunk_size)
             if not data:
                 break
-            self.log.debug("Transimitting a %s Chunk ", len(data))
             yield data
 
     @contextlib.contextmanager

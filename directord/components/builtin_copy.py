@@ -220,11 +220,6 @@ class Component(components.ComponentBase):
                         )
                         break
                     else:
-                        self.log.debug(
-                            "Job [ %s ] write Chunk %s",
-                            job["job_id"],
-                            len(data),
-                        )
                         f.write(data)
         except (FileNotFoundError, NotADirectoryError) as e:
             self.log.critical(
