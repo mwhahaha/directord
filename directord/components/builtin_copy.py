@@ -19,6 +19,7 @@ import pwd
 import shlex
 import traceback
 
+from directord import logger
 from directord import components
 from directord import utils
 
@@ -28,12 +29,14 @@ class Transfer:
 
     def __init__(self, driver):
         """Initialize the transfer context manager class."""
-
+        self.log = logger.getLogger(name="directord")
         self.bind_transfer = driver.transfer_connect()
+        self.log.debug("Transfer initialized")
 
     def __enter__(self):
         """Return the bind_transfer object on enter."""
 
+        self.log.debug("Transfer enter")
         return self.bind_transfer
 
     def __exit__(self, *args, **kwargs):
@@ -41,7 +44,9 @@ class Transfer:
 
         try:
             self.bind_transfer.close()
+            self.log.debug("Transfer closed")
         except AttributeError:
+            self.log.debug("Transfer close error")
             pass
 
 
@@ -147,14 +152,17 @@ class Component(components.ComponentBase):
         """
 
         file_to = job["file_to"]
+        job_id = job["job_id"]
         user = job.get("user")
         group = job.get("group")
         file_sha3_224 = job.get("file_sha3_224")
         blueprint = job.get("blueprint", False)
+        self.log.debug("%s | starting blueprinter", job_id)
         success, file_to = self.blueprinter(
             content=file_to, values=cache.get("args"), allow_empty_values=True
         )
         if not success:
+            self.log.error("%s | blueprinter failed", job_id)
             return None, file_to, False, None
 
         mode = job.get("mode")
@@ -166,6 +174,7 @@ class Component(components.ComponentBase):
                 "File exists {} and SHA3_224 {} matches, nothing to"
                 " transfer".format(file_to, file_sha3_224)
             )
+            self.log.debug("%s | %s", job_id, info)
             driver.socket_send(
                 socket=bind_transfer,
                 msg_id=job["job_id"].encode(),
@@ -194,6 +203,7 @@ class Component(components.ComponentBase):
         try:
             with open(file_to, "wb") as f:
                 while True:
+                    self.log.debug("%s | reading transfer data", job_id)
                     try:
                         (
                             _,
@@ -220,6 +230,7 @@ class Component(components.ComponentBase):
                         )
                         break
                     else:
+                        self.log.debug("%s | Write Chunk %s", job_id, len(data))
                         f.write(data)
         except (FileNotFoundError, NotADirectoryError) as e:
             self.log.critical(
@@ -227,6 +238,7 @@ class Component(components.ComponentBase):
             )
             return None, traceback.format_exc(), False, None
 
+        self.log.debug("%s | file blueprinter", job_id)
         success, error = self.file_blueprinter(cache=cache, file_to=file_to)
         if blueprint and not success:
             return utils.file_sha3_224(file_to), error, False, None
@@ -260,4 +272,5 @@ class Component(components.ComponentBase):
         if mode:
             os.chmod(file_to, mode)
 
+        self.log.debug("%s | _client done %s", job_id, outcome)
         return utils.file_sha3_224(file_to), stderr, outcome, None
