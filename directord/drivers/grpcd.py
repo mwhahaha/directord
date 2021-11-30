@@ -23,11 +23,11 @@ import uuid
 
 try:
     import grpc
-    from directord.drivers.generated import msg_pb2
-    from directord.drivers.generated import msg_pb2_grpc
-    from directord.drivers.generated.msg_pb2_grpc import (
-        MessageServiceServicer as grpc_MessageServiceServicer,
+
+    protos, services = grpc.protos_and_services(
+        "directord/drivers/grpcd.proto"
     )
+    grpc_MessageServiceServicer = services.MessageServiceServicer
 except (ImportError, ModuleNotFoundError):
     grpc_MessageServiceServicer = object
     pass
@@ -253,7 +253,7 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
             status = False
             job_data = None
 
-        response = msg_pb2.MessageResponse(
+        response = protos.MessageResponse(
             req_id=req_id, status=status, target=target, data=job_data
         )
         self.log.debug("%s | <- GetMessage Response: %s", req_id, response)
@@ -281,7 +281,7 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
             status = False
             job_data = None
 
-        response = msg_pb2.JobResponse(
+        response = protos.JobResponse(
             req_id=req_id, status=status, target=target, data=job_data
         )
         self.log.debug("%s | <- GetJob Response: %s", req_id, response)
@@ -305,7 +305,7 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
         q.add_queue(target, msg)
         self.log.debug("%s | + We added message to queue (%s)", req_id, target)
 
-        status = msg_pb2.Status(req_id=req_id, result=True)
+        status = protos.Status(req_id=req_id, result=True)
         self.log.debug("%s | <- PutMessage Response: %s", req_id, status)
         return status
 
@@ -327,16 +327,16 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
         q.add_queue(target, msg)
         self.log.debug("%s | + We added job to queue (%s)", req_id, target)
 
-        status = msg_pb2.Status(req_id=req_id, result=True)
+        status = protos.Status(req_id=req_id, result=True)
         self.log.debug("%s | <- PutJob Response: %s", req_id, status)
         return status
 
     def MessageCheck(self, request, context):
         """Check if messages in queue."""
-        self.log.debug(
-            "%s | -> Message Check: %s", request.req_id, request.target
-        )
-        return msg_pb2.CheckResponse(
+        # self.log.debug(
+        #     "%s | -> Message Check: %s", request.req_id, request.target
+        # )
+        return protos.CheckResponse(
             req_id=request.req_id,
             target=request.target,
             has_data=MessageQueue.instance().check_queue(request.target),
@@ -344,8 +344,10 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
 
     def JobCheck(self, request, context):
         """Check if jobs in queue."""
-        self.log.debug("%s | -> Job Check: %s", request.req_id, request.target)
-        return msg_pb2.CheckResponse(
+        # self.log.debug(
+        #     "%s | -> Job Check: %s", request.req_id, request.target
+        # )
+        return protos.CheckResponse(
             target=request.target,
             has_data=JobQueue.instance().check_queue(request.target),
         )
@@ -358,7 +360,7 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
         MessageQueue.instance().purge_queue()
         JobQueue.instance().purge_queue()
         # print("++ purging queue")
-        status = msg_pb2.Status(req_id=request.req_id, result=True)
+        status = protos.Status(req_id=request.req_id, result=True)
         # print(f"<- Response: {status}")
         return status
 
@@ -391,7 +393,7 @@ class MessageServiceClient(object):
             f"{self.server_address}:{self.server_port}"
         )
         self.channel.subscribe(wait_for_connection, try_to_connect=True)
-        self.stub = msg_pb2_grpc.MessageServiceStub(self.channel)
+        self.stub = services.MessageServiceStub(self.channel)
         self.log.debug("Waiting for channel connectivity...")
         wait_for_channel.wait()
         self.log.debug("Channel ready...")
@@ -412,7 +414,7 @@ class MessageServiceClient(object):
         if not self.stub:
             raise Exception("Message request after close")
 
-        request = msg_pb2.GetMessageRequest(
+        request = protos.GetMessageRequest(
             req_id=str(uuid.uuid1()), target=target
         )
 
@@ -451,9 +453,7 @@ class MessageServiceClient(object):
         if not self.stub:
             raise Exception("Job request after close")
 
-        request = msg_pb2.GetJobRequest(
-            req_id=str(uuid.uuid1()), target=target
-        )
+        request = protos.GetJobRequest(req_id=str(uuid.uuid1()), target=target)
 
         try:
             response = self.stub.GetJob(request)
@@ -503,7 +503,7 @@ class MessageServiceClient(object):
         """
         if not self.stub:
             raise Exception("Message request after close")
-        message = msg_pb2.MessageData(
+        message = protos.MessageData(
             identity=identity,
             msg_id=msg_id,
             control=control,
@@ -513,7 +513,7 @@ class MessageServiceClient(object):
             stderr=stderr,
             stdout=stdout,
         )
-        request = msg_pb2.PutMessageRequest(
+        request = protos.PutMessageRequest(
             req_id=str(uuid.uuid1()), target=target, data=message
         )
         self.log.debug("%s | put_message: request %s", request.req_id, request)
@@ -562,7 +562,7 @@ class MessageServiceClient(object):
         """
         if not self.stub:
             raise Exception("Job request after close")
-        job = msg_pb2.MessageData(
+        job = protos.MessageData(
             identity=identity,
             msg_id=msg_id,
             control=control,
@@ -572,7 +572,7 @@ class MessageServiceClient(object):
             stderr=stderr,
             stdout=stdout,
         )
-        request = msg_pb2.PutJobRequest(
+        request = protos.PutJobRequest(
             req_id=str(uuid.uuid1()), target=target, data=job
         )
         self.log.debug("%s | put_job: request %s", request.req_id, request)
@@ -597,7 +597,7 @@ class MessageServiceClient(object):
         """Check if messages are in queue."""
         if not self.stub:
             raise Exception("Job request after close")
-        request = msg_pb2.CheckRequest(req_id=str(uuid.uuid1()), target=target)
+        request = protos.CheckRequest(req_id=str(uuid.uuid1()), target=target)
         try:
             response = self.stub.MessageCheck(request)
             # self.log.debug("message_check: %s", response.has_data)
@@ -617,7 +617,7 @@ class MessageServiceClient(object):
         """Check if jobs are in queue."""
         if not self.stub:
             raise Exception("Job request after close")
-        request = msg_pb2.CheckRequest(req_id=str(uuid.uuid1()), target=target)
+        request = protos.CheckRequest(req_id=str(uuid.uuid1()), target=target)
         try:
             response = self.stub.JobCheck(request)
             # self.log.debug("job_check: %s", response.has_data)
@@ -637,7 +637,7 @@ class MessageServiceClient(object):
         """Empty queues."""
         if not self.stub:
             raise Exception("Message request after close")
-        request = msg_pb2.BasicRequest(req_id=str(uuid.uuid1()), verbose=False)
+        request = protos.BasicRequest(req_id=str(uuid.uuid1()), verbose=False)
         try:
             response = self.stub.PurgeQueues(request)
             self.log.warning("%s | Queue purged", request.req_id)
@@ -674,7 +674,7 @@ class MessageServiceServer(object):
             futures.ThreadPoolExecutor(max_workers=workers)
         )
         # add grpc servicer(s)
-        msg_pb2_grpc.add_MessageServiceServicer_to_server(
+        services.add_MessageServiceServicer_to_server(
             MessageServiceServicer(self.log), self._server
         )
 
