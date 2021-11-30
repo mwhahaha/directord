@@ -521,7 +521,9 @@ class MessageServiceClient(object):
         try:
             response = self.stub.PutMessage(request)
             self.log.debug(
-                "%s | put_message: Message submitted", request.req_id
+                "%s | put_message: Message submitted, result: %s",
+                request.req_id,
+                response.result,
             )
             # print(response)
             return response.result
@@ -579,7 +581,11 @@ class MessageServiceClient(object):
 
         try:
             response = self.stub.PutJob(request)
-            self.log.debug("%s | put_job: Job submitted", request.req_id)
+            self.log.debug(
+                "%s | put_job: Job submitted, result: %s",
+                request.req_id,
+                response.result,
+            )
             # print(response)
             return response.result
         except grpc.RpcError as err:
@@ -684,7 +690,7 @@ class MessageServiceServer(object):
         self.log.info("Started Message Service Server (%s:%s)", address, port)
 
     @classmethod
-    def instance(cls, logger, address, port, secure=False, workers=4):
+    def instance(cls, logger, address, port, secure=False, workers=8):
         """Get queue instance."""
         if cls._instance is None:
             cls._instance = cls.__new__(cls)
