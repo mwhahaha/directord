@@ -50,6 +50,20 @@ def parse_args(parser, parser_server, parser_client):
 
     group = parser.add_argument_group("gRPC driver options")
     group.add_argument(
+        "--grpc-log-trace",
+        action="store_true",
+        default=bool(os.getenv("DIRECTORD_GRPC_LOG_TRACE", "False")),
+        help=("gRPC driver trace logging. Default %(default)s."),
+    )
+
+    group.add_argument(
+        "--grpc-log-debug",
+        action="store_true",
+        default=bool(os.getenv("DIRECTORD_GRPC_LOG_DEBUG", "False")),
+        help=("gRPC driver debug logging. Default %(default)s."),
+    )
+
+    group.add_argument(
         "--grpc-port",
         type=int,
         default=os.getenv("DIRECTORD_GRPC_PORT", 5558),
@@ -249,21 +263,21 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
         """
         target = request.target
         req_id = request.req_id
-        # self.log.debug("%s | -> GetMessage Request: %s", req_id, request)
+        self.log.trace("%s | -> GetMessage Request: %s", req_id, request)
 
         q = MessageQueue.instance()
         status = True
         job_data = q.get_from_queue(target)
 
         if not job_data:
-            self.log.debug("%s | ! No messages for %s", req_id, target)
+            self.log.trace("%s | ! No messages for %s", req_id, target)
             status = False
             job_data = None
 
         response = msg_pb2.MessageResponse(
             req_id=req_id, status=status, target=target, data=job_data
         )
-        # self.log.debug("%s | <- GetMessage Response: %s", req_id, response)
+        self.log.trace("%s | <- GetMessage Response: %s", req_id, response)
         return response
 
     def GetJob(self, request, context):
@@ -277,21 +291,21 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
         """
         target = request.target
         req_id = request.req_id
-        # self.log.debug("%s | -> GetJob Request: %s", req_id, request)
+        self.log.trace("%s | -> GetJob Request: %s", req_id, request)
 
         q = JobQueue.instance()
         status = True
         job_data = q.get_from_queue(target)
 
         if not job_data:
-            self.log.debug("%s | ! No jobs for %s", req_id, target)
+            self.log.trace("%s | ! No jobs for %s", req_id, target)
             status = False
             job_data = None
 
         response = msg_pb2.JobResponse(
             req_id=req_id, status=status, target=target, data=job_data
         )
-        # self.log.debug("%s | <- GetJob Response: %s", req_id, response)
+        self.log.trace("%s | <- GetJob Response: %s", req_id, response)
         return response
 
     def PutMessage(self, request, context):
@@ -307,13 +321,13 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
         req_id = request.req_id
         msg = request.data
 
-        # self.log.debug("%s | -> PutMessage Request: %s", req_id, request)
+        self.log.trace("%s | -> PutMessage Request: %s", req_id, request)
         q = MessageQueue.instance()
         q.add_queue(target, msg)
-        self.log.debug("%s | + We added message to queue (%s)", req_id, target)
+        self.log.trace("%s | + We added message to queue (%s)", req_id, target)
 
         status = msg_pb2.Status(req_id=req_id, result=True)
-        # self.log.debug("%s | <- PutMessage Response: %s", req_id, status)
+        self.log.trace("%s | <- PutMessage Response: %s", req_id, status)
         return status
 
     def PutJob(self, request, context):
@@ -329,20 +343,20 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
         req_id = request.req_id
         msg = request.data
 
-        # self.log.debug("%s | -> PutJob Request: %s", req_id, request)
+        self.log.trace("%s | -> PutJob Request: %s", req_id, request)
         q = JobQueue.instance()
         q.add_queue(target, msg)
-        self.log.debug("%s | + We added job to queue (%s)", req_id, target)
+        self.log.trace("%s | + We added job to queue (%s)", req_id, target)
 
         status = msg_pb2.Status(req_id=req_id, result=True)
-        # self.log.debug("%s | <- PutJob Response: %s", req_id, status)
+        self.log.trace("%s | <- PutJob Response: %s", req_id, status)
         return status
 
     def MessageCheck(self, request, context):
         """Check if messages in queue."""
-        # self.log.debug(
-        #     "%s | -> Message Check: %s", request.req_id, request.target
-        # )
+        self.log.trace(
+            "%s | -> Message Check: %s", request.req_id, request.target
+        )
         return msg_pb2.CheckResponse(
             req_id=request.req_id,
             target=request.target,
@@ -351,9 +365,7 @@ class MessageServiceServicer(grpc_MessageServiceServicer):
 
     def JobCheck(self, request, context):
         """Check if jobs in queue."""
-        # self.log.debug(
-        #     "%s | -> Job Check: %s", request.req_id, request.target
-        # )
+        self.log.trace("%s | -> Job Check: %s", request.req_id, request.target)
         return msg_pb2.CheckResponse(
             target=request.target,
             has_data=JobQueue.instance().check_queue(request.target),
@@ -400,7 +412,7 @@ class MessageServiceClient(object):
         wait_for_channel = threading.Event()
 
         def wait_for_connection(connectivity):
-            self.log.debug("grpc wait_for_connection: %s", connectivity)
+            self.log.info("grpc wait_for_connection: %s", connectivity)
             if connectivity in [grpc.ChannelConnectivity.READY]:
                 wait_for_channel.set()
 
@@ -413,9 +425,9 @@ class MessageServiceClient(object):
         )
         self.channel.subscribe(wait_for_connection, try_to_connect=True)
         self.stub = msg_pb2_grpc.MessageServiceStub(self.channel)
-        self.log.debug("Waiting for channel connectivity...")
+        self.log.info("Waiting for channel connectivity...")
         wait_for_channel.wait()
-        self.log.debug("Channel ready...")
+        self.log.info("Channel ready...")
 
     def close(self):
         """Close channels."""
@@ -439,18 +451,16 @@ class MessageServiceClient(object):
 
         try:
             response = self.stub.GetMessage(request)
-            # self.log.debug("%s | get_message: Request OK.", request.req_id)
+            self.log.trace("%s | get_message: Request OK.", request.req_id)
             if response.status:
-                self.log.debug(
+                self.log.trace(
                     "%s | get_message: Message fetched.", request.req_id
                 )
-                # print(response)
                 return response.target, response.data
             else:
-                self.log.debug(
+                self.log.trace(
                     "%s | get_message: No message found.", request.req_id
                 )
-                # print(response)
                 return target, None
         except grpc.RpcError as err:
             self.log.error(
@@ -478,14 +488,12 @@ class MessageServiceClient(object):
 
         try:
             response = self.stub.GetJob(request)
-            # self.log.debug("%s | get_job: Request OK.", request.req_id)
+            self.log.trace("%s | get_job: Request OK.", request.req_id)
             if response.status:
-                self.log.debug("%s | get_job: Job fetched.", request.req_id)
-                # print(response)
+                self.log.trace("%s | get_job: Job fetched.", request.req_id)
                 return response.target, response.data
             else:
-                self.log.debug("%s | get_job: No job found.", request.req_id)
-                # print(response)
+                self.log.trace("%s | get_job: No job found.", request.req_id)
                 return target, None
         except grpc.RpcError as err:
             self.log.error(
@@ -537,18 +545,15 @@ class MessageServiceClient(object):
         request = msg_pb2.PutMessageRequest(
             req_id=str(uuid.uuid1()), target=target, data=message
         )
-        # self.log.debug(
-        #     "%s | put_message: request %s", request.req_id, request
-        # )
+        self.log.trace("%s | put_message: request %s", request.req_id, request)
 
         try:
             response = self.stub.PutMessage(request)
-            self.log.debug(
+            self.log.trace(
                 "%s | put_message: Message submitted, %s",
                 request.req_id,
                 message.msg_id,
             )
-            # print(response)
             return response.result
         except grpc.RpcError as err:
             self.log.error(
@@ -600,16 +605,15 @@ class MessageServiceClient(object):
         request = msg_pb2.PutJobRequest(
             req_id=str(uuid.uuid1()), target=target, data=job
         )
-        # self.log.debug("%s | put_job: request %s", request.req_id, request)
+        self.log.trace("%s | put_job: request %s", request.req_id, request)
 
         try:
             response = self.stub.PutJob(request)
-            self.log.debug(
+            self.log.trace(
                 "%s | put_job: Job submitted, %s",
                 request.req_id,
                 job.msg_id,
             )
-            # print(response)
             return response.result
         except grpc.RpcError as err:
             self.log.error(
@@ -629,7 +633,7 @@ class MessageServiceClient(object):
         request = msg_pb2.CheckRequest(req_id=str(uuid.uuid1()), target=target)
         try:
             response = self.stub.MessageCheck(request)
-            # self.log.debug("message_check: %s", response.has_data)
+            self.log.trace("message_check: %s", response.has_data)
             return response.has_data
         except grpc.RpcError as err:
             self.log.error(
@@ -649,7 +653,7 @@ class MessageServiceClient(object):
         request = msg_pb2.CheckRequest(req_id=str(uuid.uuid1()), target=target)
         try:
             response = self.stub.JobCheck(request)
-            # self.log.debug("job_check: %s", response.has_data)
+            self.log.trace("job_check: %s", response.has_data)
             return response.has_data
         except grpc.RpcError as err:
             self.log.error(
@@ -697,7 +701,7 @@ class MessageServiceServer(object):
     def _setup(self, address, port, secure, workers, compression=True):
         """Setup data data."""
         if self._server:
-            self.log.debug("Backend already configured, ignoring bind")
+            self.log.info("Backend already configured, ignoring bind")
             return
         compression_type = grpc.Compression.Gzip
         if not compression:
@@ -734,6 +738,43 @@ class MessageServiceServer(object):
             self.log.info("Stopping Message Service Server")
             self._server.stop(grace=grace)
         self._server = None
+
+
+class GrpcdLogger(object):
+    """GrpcdLogger wrapper.
+
+    A class to wrap the usual directord logger with additional options
+    to exclude some debug actions.
+    """
+
+    log = None
+    debug = False
+    trace = False
+
+    def __init__(self, logger, debug=False, trace=False):
+        """Init."""
+        self.log = logger
+        self.debug = debug
+        self.trace = trace
+
+    def trace(self, *args, **kwargs):
+        if not self.trace:
+            return
+        self.log.debug(*args, **kwargs)
+
+    def debug(self, *args, **kwargs):
+        if not self.debug and not self.trace:
+            return
+        self.log.debug(*args, **kwargs)
+
+    def info(self, *args, **kwargs):
+        self.log.info(*args, **kwargs)
+
+    def warning(self, *args, **kwargs):
+        self.log.warning(*args, **kwargs)
+
+    def error(self, *args, **kwargs):
+        self.log.warning(*args, **kwargs)
 
 
 class Driver(drivers.BaseDriver):
@@ -780,6 +821,14 @@ class Driver(drivers.BaseDriver):
             encrypted_traffic_data=self.encrypted_traffic_data,
             interface=interface,
         )
+
+        # use our logger
+        self.log = GrpcdLogger(
+            logger=self.log,
+            debug=self.args.grpc_log_debug,
+            trace=self.args.grpc_log_trace,
+        )
+
         # override identity because server identity is static to get messages
         # back to it
         if self.mode == "server":
