@@ -494,7 +494,7 @@ class MessageServiceClient(object):
 
         try:
             response = self.stub.GetMessage(request)
-            # self.log.debug("%s | get_message: Request OK.", request.req_id)
+            self.log.debug("%s | get_message: Request OK.", request.req_id)
             if response.status:
                 self.log.debug(
                     "%s | get_message: Message fetched.", request.req_id
@@ -535,7 +535,7 @@ class MessageServiceClient(object):
             response = self.stub.GetJob(request)
             # self.log.debug("%s | get_job: Request OK.", request.req_id)
             if response.status:
-                self.log.debug("%s | get_job: Job fetched.", request.req_id)
+                # self.log.debug("%s | get_job: Job fetched.", request.req_id)
                 # print(response)
                 return response.target, response.data
             else:
@@ -592,9 +592,9 @@ class MessageServiceClient(object):
         request = msg_pb2.PutMessageRequest(
             req_id=str(uuid.uuid1()), target=target, data=message
         )
-        # self.log.debug(
-        #     "%s | put_message: request %s", request.req_id, request
-        # )
+        self.log.debug(
+            "%s | put_message: request %s", request.req_id, request
+        )
 
         try:
             response = self.stub.PutMessage(request)
@@ -659,11 +659,11 @@ class MessageServiceClient(object):
 
         try:
             response = self.stub.PutJob(request)
-            self.log.debug(
-                "%s | put_job: Job submitted, %s",
-                request.req_id,
-                job.msg_id,
-            )
+            # self.log.debug(
+            #     "%s | put_job: Job submitted, %s",
+            #     request.req_id,
+            #     job.msg_id,
+            # )
             # print(response)
             return response.result
         except grpc.RpcError as err:
