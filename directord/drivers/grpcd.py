@@ -243,6 +243,123 @@ class JobQueue(QueueBase):
     """Job queue instance."""
 
 
+class GrpcdCredentials:
+    """Credentials instance.
+
+    If you pass in a different credential object into a channel, it'll create
+    a new subchannel (connection). Since we're not supporting changing
+    the credentials on a running system we only need to load this once.
+    """
+
+    _instance = {}
+    _ssl_ca = None
+    _ssl_cert = None
+    _ssl_key = None
+    _ssl_auth = None
+    _server_creds = None
+    _client_creds = None
+
+    def __init__(self):
+        """Init."""
+        raise RuntimeError("Use instance()")
+
+    def _setup_server(self):
+        """Setup the server credentials."""
+        self.log.warning("Creating new server credentials")
+        if not self._ssl_cert or not os.path.exists(self._ssl_cert):
+            raise Exception(
+                f"Configured SSL Cert {self._ssl_cert} does not exist."
+            )
+        if not self._ssl_key or not os.path.exists(self._ssl_key):
+            raise Exception(
+                f"Configured SSL Key {self._ssl_key} does not exist."
+            )
+        with open(self._ssl_cert, "rb") as cert_data:
+            ssl_cert_data = cert_data.read()
+        with open(self._ssl_key, "rb") as key_data:
+            ssl_key_data = key_data.read()
+        key_pairs = [(ssl_key_data, ssl_cert_data)]
+        # handle ca
+        if not self._ssl_ca or not os.path.exists(self._ssl_ca):
+            raise Exception(
+                f"Configured SSL CA {self._ssl_ca} does not exist."
+            )
+        with open(self._ssl_ca, "rb") as ca_data:
+            ssl_ca_data = ca_data.read()
+
+        self._server_creds = grpc.ssl_server_credentials(
+            key_pairs, ssl_ca_data, self._ssl_auth
+        )
+
+    def _setup_client(self):
+        """Setup the client credentials."""
+        self.log.warning("Creating new client credentials")
+        ssl_cert = None
+        ssl_key = None
+        if not os.path.exists(self._ssl_ca):
+            raise Exception(
+                "SSL is enabled but CA file does not exist "
+                f"({self._ssl_ca})"
+            )
+        with open(self._ssl_ca, "rb") as ca_file:
+            ca_cert = ca_file.read()
+
+        if (
+            not self._ssl_cert
+            or not os.path.exists(self._ssl_cert)
+            or not self._ssl_key
+            or not os.path.exists(self._ssl_key)
+        ):
+            self.log.warning(
+                "Client SSL Cert or Key do not exist. "
+                "Skipping configuration"
+            )
+        else:
+            with open(self._ssl_cert, "rb") as cert_file:
+                ssl_cert = cert_file.read()
+            with open(self._ssl_key, "rb") as key_file:
+                ssl_key = key_file.read()
+
+        self._client_creds = grpc.ssl_channel_credentials(
+            ca_cert, ssl_key, ssl_cert
+        )
+
+    @classmethod
+    def instance(
+        cls,
+        logger,
+        ssl_ca=None,
+        ssl_cert=None,
+        ssl_key=None,
+        ssl_auth=None,
+    ):
+        """Get creds instance."""
+        creds = (ssl_ca, ssl_cert, ssl_key)
+        if cls._instance.get(creds) is None:
+            inst = cls.__new__(cls)
+            inst.log = logger
+            inst._ssl_ca = ssl_ca
+            inst._ssl_cert = ssl_cert
+            inst._ssl_key = ssl_key
+            inst._ssl_auth = ssl_auth
+            cls._instance[creds] = inst
+        return cls._instance.get(creds)
+
+    @property
+    def server_creds(self):
+        """Return server creds object."""
+        if not self._server_creds:
+            self._setup_server()
+        return self._server_creds
+
+    @property
+    def client_creds(self):
+        """Return client creds object."""
+        if not self._client_creds:
+            self._setup_client()
+        return self._client_creds
+
+
 class MessageServiceServicer(grpc_MessageServiceServicer):
     def __init__(self, logger):
         self.log = logger
@@ -424,35 +541,12 @@ class MessageServiceClient(object):
             compression_type = grpc.Compression.NoCompression
 
         if self.secure:
-            ssl_cert = None
-            ssl_key = None
-            if not os.path.exists(self.ssl_ca):
-                raise Exception(
-                    "SSL is enabled but CA file does not exist "
-                    f"({self.ssl_ca})"
-                )
-            with open(self.ssl_ca, "rb") as ca_file:
-                ca_cert = ca_file.read()
-
-            if (
-                not self.ssl_cert
-                or not os.path.exists(self.ssl_cert)
-                or not self.ssl_key
-                or not os.path.exists(self.ssl_key)
-            ):
-                self.log.warning(
-                    "Client SSL Cert or Key do not exist. "
-                    "Skipping configuration"
-                )
-            else:
-                with open(self.ssl_cert, "rb") as cert_file:
-                    ssl_cert = cert_file.read()
-                with open(self.ssl_key, "rb") as key_file:
-                    ssl_key = key_file.read()
-
-            credentials = grpc.ssl_channel_credentials(
-                ca_cert, ssl_key, ssl_cert
+            creds = GrpcdCredentials.instance(
+                self.log, self.ssl_ca, self.ssl_cert, self.ssl_key
             )
+            credentials = creds.client_creds
+            self.log.warning("Using credentials obj %s", credentials)
+
             self.log.info("grpc client IS using SSL")
             self.channel = grpc.secure_channel(
                 f"{self.server_address}:{self.server_port}",
@@ -779,30 +873,11 @@ class MessageServiceServer(object):
         )
 
         if secure:
-            # handle cert/key
-            key_pairs = []
-            if not ssl_cert or not os.path.exists(ssl_cert):
-                raise Exception(
-                    f"Configured SSL Cert {ssl_cert} does not exist."
-                )
-            if not ssl_key or not os.path.exists(ssl_key):
-                raise Exception(
-                    f"Configured SSL Key {ssl_key} does not exist."
-                )
-            with open(ssl_cert, "rb") as cert_data:
-                ssl_cert_data = cert_data.read()
-            with open(ssl_key, "rb") as key_data:
-                ssl_key_data = key_data.read()
-            key_pairs.append((ssl_key_data, ssl_cert_data))
-            # handle ca
-            if not ssl_ca or not os.path.exists(ssl_ca):
-                raise Exception(f"Configured SSL CA {ssl_ca} does not exist.")
-            with open(ssl_ca, "rb") as ca_data:
-                ssl_ca_data = ca_data.read()
-
-            server_credentials = grpc.ssl_server_credentials(
-                key_pairs, ssl_ca_data, ssl_auth
+            # Only use a single credentials object
+            creds = GrpcdCredentials.instance(
+                self.log, ssl_ca, ssl_cert, ssl_key, ssl_auth
             )
+            server_credentials = creds.server_creds
 
             self.log.info("grpc server IS using SSL")
             self._server.add_secure_port(
