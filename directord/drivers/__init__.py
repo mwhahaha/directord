@@ -20,7 +20,7 @@ import threading
 
 from directord import iodict
 from directord import logger
-from directord import models
+from directord import utils
 
 
 def parse_args(parser):
@@ -59,7 +59,17 @@ class _FlushQueue(queue.Queue, iodict.FlushQueue):
         self.semaphore = semaphore
 
 
-class BaseDriver(models.BaseModel):
+class BaseDriver:
+    coordination_failed = "\x07"  # Signals coordination failed
+    coordination_ack = "\x10"  # Signals coordination acknowledged
+    coordination_notice = "\x11"  # Signals coordination notice
+    job_end = "\x04"  # Signals job ended
+    job_failed = "\x15"  # Signals job failed
+    job_processing = "\x16"  # Signals job processing
+    heartbeat_notice = "\x05"  # Signals heartbeat notice
+    nullbyte = "\x00"  # Signals null
+    transfer_start = "\x02"  # Signals transfer start
+    transfer_end = "\x03"  # Signals transfer end
     thread_processor = ExceptionThreadProcessor
     event = threading.Event()
     semaphore = threading.Semaphore

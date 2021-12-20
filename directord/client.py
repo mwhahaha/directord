@@ -62,12 +62,18 @@ class Client(interface.ProcessInterface):
         :type lock: Object
         """
 
-        for item in queue.getter():
-            component_kwargs, command, info = item
-            self.log.debug(
-                "Job received [ %s ]", component_kwargs["job"]["job_id"]
-            )
-            self.job_q_component_run(component_kwargs, command, info, lock)
+        while not queue.empty():
+            try:
+                component_kwargs, command, info = queue.get_nowait()
+            except ValueError as e:
+                self.log.critical("Queue object value error [ %s ]", str(e))
+            except Exception:
+                break
+            else:
+                self.log.debug(
+                    "Job received [ %s ]", component_kwargs["job"]["job_id"]
+                )
+                self.job_q_component_run(component_kwargs, command, info, lock)
 
             if self.driver.event.is_set():
                 return
@@ -140,19 +146,23 @@ class Client(interface.ProcessInterface):
             lock=lock,
         )
         parent_tracker = collections.OrderedDict()
-        for item in parent_tracker_recover.getter():
-            k, v = item
-            q = self.driver.get_queue(name=k)
-            parent_tracker[k] = dict(t=None, q=q, bypass=v)
-            parent_tracker[k]["t"] = self.driver.thread_processor(
-                target=self.q_processor,
-                kwargs=dict(
-                    queue=parent_tracker[k]["q"],
-                    lock=lock,
-                ),
-                name=k,
-                daemon=True,
-            )
+        while not parent_tracker_recover.empty():
+            try:
+                k, v = parent_tracker_recover.get_nowait()
+            except Exception:
+                break
+            else:
+                q = self.driver.get_queue(name=k)
+                parent_tracker[k] = dict(t=None, q=q, bypass=v)
+                parent_tracker[k]["t"] = self.driver.thread_processor(
+                    target=self.q_processor,
+                    kwargs=dict(
+                        queue=parent_tracker[k]["q"],
+                        lock=lock,
+                    ),
+                    name=k,
+                    daemon=True,
+                )
 
         while not q_processes.empty() or parent_tracker:
             try:
@@ -177,24 +187,9 @@ class Client(interface.ProcessInterface):
                 if lower_command == "queuesentinel":
                     count = 0
                     for value in list(parent_tracker.values()):
-                        count = 0
-                        for item in value["q"].getter():
-                            _kwargs, _command, _ = item
-                            self.q_return.put(
-                                (
-                                    None,
-                                    None,
-                                    False,
-                                    "Omitted due to sentinel from {}".format(
-                                        job["job_id"]
-                                    ),
-                                    _kwargs["job"],
-                                    _command,
-                                    0,
-                                    None,
-                                )
-                            )
-                            count += 1
+                        count += self.purge_queue(
+                            queue=value["q"], job_id=job["job_id"]
+                        )
                     self.log.info(
                         "Purged %s items from the work queues", count
                     )
@@ -286,6 +281,43 @@ class Client(interface.ProcessInterface):
                 return
 
             time.sleep(sleep_interval)
+
+    def purge_queue(self, queue, job_id):
+        """Purge all jobs from the queue.
+
+        :param queue: Queue object
+        :type queue: Object
+        :param job_id: Job UUID
+        :type job_id: String
+        :returns: Integer
+        """
+
+        total_count = 0
+        while not queue.empty():
+            try:
+                _kwargs, _command, _ = queue.get_nowait()
+                total_count += 1
+            except ValueError as e:
+                self.log.critical("Queue object value error [ %s ]", str(e))
+                break
+            except Exception:
+                break
+            else:
+                self.q_return.put(
+                    (
+                        None,
+                        None,
+                        False,
+                        "Omitted due to sentinel from {}".format(job_id),
+                        _kwargs["job"],
+                        _command,
+                        0,
+                        None,
+                    )
+                )
+
+        self.log.info("Cleared %s items from the work queue", total_count)
+        return total_count
 
     def job_q_component_run(self, component_kwargs, command, info, lock):
         """Execute a component operation.
@@ -611,9 +643,7 @@ class Client(interface.ProcessInterface):
         :returns: Boolean
         """
 
-        results = False
-        for item in self.q_return.getter():
-            results = True
+        try:
             (
                 stdout,
                 stderr,
@@ -623,7 +653,12 @@ class Client(interface.ProcessInterface):
                 command,
                 execution_time,
                 block_on_tasks,
-            ) = item
+            ) = self.q_return.get_nowait()
+        except ValueError as e:
+            self.log.critical("Return object value error [ %s ]", str(e))
+        except Exception:
+            return False
+        else:
             self.log.debug("Found task results for [ %s ].", job["job_id"])
             with utils.ClientStatus(
                 job_id=job["job_id"],
@@ -640,8 +675,7 @@ class Client(interface.ProcessInterface):
                     block_on_tasks,
                     c,
                 )
-
-        return results
+            return True
 
     def _parent_check(self, conn, cache, job):
         """Check if a parent job has failed.
@@ -730,7 +764,7 @@ class Client(interface.ProcessInterface):
                 )
                 heartbeat_time = time.time() + 30
 
-            if self.job_q_results():
+            while self.job_q_results():
                 poller_interval, poller_time = 1, time.time()
 
             while self.driver.job_check(constant=poller_interval):
@@ -857,6 +891,5 @@ class Client(interface.ProcessInterface):
             lock=self.driver.get_lock(),
         )
         self.run_threads(threads=threads, stop_event=self.driver.event)
-        self.driver.shutdown()
         self.q_return.flush()
         self.q_processes.flush()
