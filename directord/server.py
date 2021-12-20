@@ -627,6 +627,7 @@ class Server(interface.ProcessInterface):
         :type job_id: String
         """
 
+        _nodes = len(self.return_jobs[job_id]._nodes)
         start_time = time.time()
         while True:
             if self.return_jobs[job_id].failed:
@@ -634,7 +635,7 @@ class Server(interface.ProcessInterface):
                     "Query job [ %s ] encountered failures.", job_id
                 )
                 return
-            elif all(self.return_jobs[job_id].STDOUT.values()):
+            elif len(self.return_jobs[job_id].STDOUT.keys()) >= _nodes:
                 break
             elif start_time + 600 >= time.time():
                 self.log.error(
